@@ -35,3 +35,5 @@ PUBLIC_URL = env("PUBLIC_URL").rstrip("/")
 EMAIL_PROVIDER = env("EMAIL_PROVIDER", "resend").lower()
 EMAIL_FROM = env("EMAIL_FROM")
 EMAIL_TO = [e.strip() for e in env("EMAIL_TO").split(",") if e.strip()]
+# A quien avisar si la actualizacion falla, y a quien va el correo de prueba (no a los directores)
+EMAIL_AVISOS = [e.strip() for e in env("EMAIL_AVISOS").split(",") if e.strip()]

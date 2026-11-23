@@ -203,3 +203,34 @@ def test_acceso_abierto(tmp_path, monkeypatch):
     monkeypatch.delenv("ACCESO_ABIERTO")
     with TestClient(main.app, follow_redirects=False) as c:
         assert c.get("/").status_code == 303
+
+
+def test_correo_diario_por_smtp(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "m.db"))
+    monkeypatch.setattr(config, "EMAIL_PROVIDER", "smtp")
+    monkeypatch.setattr(config, "EMAIL_FROM", "Reporte <x@gmail.com>")
+    monkeypatch.setattr(config, "EMAIL_TO", ["d1@ejemplo.com", "d2@ejemplo.com"])
+    monkeypatch.setattr(config, "EMAIL_AVISOS", ["yo@ejemplo.com"])
+    for k, v in {"SMTP_HOST": "smtp.gmail.com", "SMTP_USER": "x@gmail.com", "SMTP_PASSWORD": "p"}.items():
+        monkeypatch.setenv(k, v)
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, u, p): pass
+        def send_message(self, msg): sent.append(msg)
+
+    from app import main, mailer
+    monkeypatch.setattr(mailer.smtplib, "SMTP", FakeSMTP)
+    db.init(config.DB_PATH)
+    r = main._send_daily_mail(True, only_test=True)
+    assert "prueba" in r["correo"] and sent[-1]["To"] == "yo@ejemplo.com" and sent[-1]["Subject"].startswith("[PRUEBA] Reporte ventas - ")
+    assert "RESUMEN DEL DIA ANTERIOR" in sent[-1].get_content()
+    r = main._send_daily_mail(True)
+    assert sent[-1]["To"] == "d1@ejemplo.com, d2@ejemplo.com" and not sent[-1]["Subject"].startswith("[PRUEBA]")
+    r = main._send_daily_mail(False, "HTTP 401")
+    assert sent[-1]["To"] == "yo@ejemplo.com" and "sin actualizar" in sent[-1]["Subject"] and "no enviado" in r["correo"]
+    assert len(sent) == 3

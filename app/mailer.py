@@ -7,15 +7,20 @@ import httpx
 from . import config
 
 
-def send(subject: str, html: str, to: list[str] | None = None) -> str:
+def send(subject: str, html: str | None = None, to: list[str] | None = None, text: str | None = None) -> str:
+    """Envia un correo. Con `text` va en texto plano (formato del reporte diario); con `html`, en HTML."""
     to = to or config.EMAIL_TO
     if not to or not config.EMAIL_FROM:
         raise RuntimeError("Faltan EMAIL_TO o EMAIL_FROM")
     if config.EMAIL_PROVIDER == "smtp":
+        for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"):
+            if not config.env(k):
+                raise RuntimeError(f"Falta {k}")
         msg = EmailMessage()
         msg["Subject"], msg["From"], msg["To"] = subject, config.EMAIL_FROM, ", ".join(to)
-        msg.set_content("Abra este correo en un cliente que muestre HTML.")
-        msg.add_alternative(html, subtype="html")
+        msg.set_content(text or "Abra este correo en un cliente que muestre HTML.")
+        if html:
+            msg.add_alternative(html, subtype="html")
         with smtplib.SMTP(config.env("SMTP_HOST"), int(config.env("SMTP_PORT", "587")), timeout=30) as s:
             s.starttls()
             s.login(config.env("SMTP_USER"), config.env("SMTP_PASSWORD"))
@@ -26,7 +31,8 @@ def send(subject: str, html: str, to: list[str] | None = None) -> str:
         raise RuntimeError("Falta RESEND_API_KEY")
     r = httpx.post("https://api.resend.com/emails", timeout=30,
                    headers={"Authorization": f"Bearer {key}"},
-                   json={"from": config.EMAIL_FROM, "to": to, "subject": subject, "html": html})
+                   json={"from": config.EMAIL_FROM, "to": to, "subject": subject,
+                         **({"html": html} if html else {"text": text or ""})})
     if r.status_code >= 400:
         raise RuntimeError(f"Resend respondio HTTP {r.status_code}: {r.text[:300]}")
     return f"resend: enviado a {len(to)}"

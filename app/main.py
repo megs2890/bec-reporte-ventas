@@ -72,6 +72,40 @@ def _state() -> dict:
     return _cache
 
 
+def _send_daily_mail(sync_ok: bool, error: str = "", only_test: bool = False) -> dict:
+    """Correo diario en el formato de siempre, con los datos de ayer.
+    Si la actualizacion fallo no se envia el reporte: solo un aviso a EMAIL_AVISOS.
+    only_test=True lo manda unicamente a EMAIL_AVISOS, para probar sin escribir a los directores."""
+    now = datetime.now(config.TZ)
+    ts, day = now.strftime("%Y-%m-%d %H:%M"), (now.date() - timedelta(days=1)).isoformat()
+    out: dict = {}
+    try:
+        if only_test and not config.EMAIL_AVISOS:
+            raise RuntimeError("Falta EMAIL_AVISOS (a quien mandar la prueba)")
+        if not sync_ok:
+            if config.EMAIL_AVISOS:
+                mailer.send("Reporte ventas BEC: datos sin actualizar",
+                            text=f"La actualizacion de hoy desde InterFuerza fallo y no se envio el reporte.\n\n"
+                                 f"Detalle: {error}\n\nRevise la pagina Estado: {config.PUBLIC_URL}/estado",
+                            to=config.EMAIL_AVISOS)
+            out["correo"] = "no enviado: la actualizacion fallo" + (" (aviso enviado)" if config.EMAIL_AVISOS else "")
+        else:
+            with db.connect() as con:
+                lines = db.all_lines(con)
+                actualizado = db.get_meta(con, "actualizado", "")
+            e = report.daily_email(lines, day, config.PUBLIC_URL, actualizado, con_clave=not _open_access())
+            to = config.EMAIL_AVISOS if only_test else config.EMAIL_TO
+            subject = ("[PRUEBA] " if only_test else "") + e["asunto"]
+            out["correo"] = mailer.send(subject, text=e["texto"], to=to) + (" (prueba)" if only_test else "")
+        with db.connect() as con:
+            db.log_run(con, ts, "correo", True, out["correo"])
+    except Exception as ex:
+        out["correo_error"] = f"{type(ex).__name__}: {ex}"
+        with db.connect() as con:
+            db.log_run(con, ts, "correo", False, out["correo_error"])
+    return out
+
+
 def daily_job(send_mail: bool = True) -> dict:
     """Sincroniza con InterFuerza y envia el correo. Nunca se ejecuta dos veces a la vez."""
     if not _lock.acquire(blocking=False):
@@ -84,19 +118,7 @@ def daily_job(send_mail: bool = True) -> dict:
             with db.connect() as con:
                 db.log_run(con, datetime.now(config.TZ).strftime("%Y-%m-%d %H:%M"), "sync", False, result["error"])
         if send_mail and config.EMAIL_TO:
-            ts = datetime.now(config.TZ).strftime("%Y-%m-%d %H:%M")
-            try:
-                with db.connect() as con:
-                    lines = db.all_lines(con)
-                    actualizado = db.get_meta(con, "actualizado", "") or "carga inicial"
-                subject, html = mailer.render(report.daily_summary(lines), actualizado, bool(result.get("ok")), report.fmt_date)
-                result["correo"] = mailer.send(subject, html)
-                with db.connect() as con:
-                    db.log_run(con, ts, "correo", True, result["correo"])
-            except Exception as e:
-                result["correo_error"] = f"{type(e).__name__}: {e}"
-                with db.connect() as con:
-                    db.log_run(con, ts, "correo", False, result["correo_error"])
+            result.update(_send_daily_mail(bool(result.get("ok")), result.get("error", "")))
         return result
     finally:
         _lock.release()
@@ -190,18 +212,22 @@ def estado(request: Request, iniciado: int = 0):
                 "Formula de monto": db.get_meta(con, "modo_monto", "") or "sin calibrar",
                 "Programado": f"{config.SYNC_HOUR:02d}:{config.SYNC_MINUTE:02d} hora de Panama",
                 "Destinatarios del correo": str(len(config.EMAIL_TO)),
+                "Avisos y pruebas van a": ", ".join(config.EMAIL_AVISOS) or "sin configurar",
+                "Envio de correo": f"{config.EMAIL_PROVIDER}, clave " + ("configurada" if config.env("SMTP_PASSWORD" if config.EMAIL_PROVIDER == "smtp" else "RESEND_API_KEY") else "FALTA"),
                 "Token de InterFuerza": "configurado" if config.env("IFX_TOKEN") else "FALTA",
                 "Enlace privado del resumen (para la tarea del correo)": f"{config.PUBLIC_URL}/resumen/{_resumen_token()}"}
         runs = db.last_runs(con)
     rows = "".join(f"<tr><td>{_h.escape(r['ts'])}</td><td>{_h.escape(r['kind'])}</td><td>{'ok' if r['ok'] else 'FALLO'}</td><td>{_h.escape(r['detail'] or '')}</td></tr>" for r in runs)
     info = "".join(f"<tr><td>{k}</td><td>{_h.escape(v)}</td></tr>" for k, v in meta.items())
-    aviso = "<p><b>Actualizacion iniciada.</b> Recargue esta pagina en unos minutos.</p>" if iniciado else ""
+    aviso = {1: "<p><b>Actualizacion iniciada.</b> Recargue esta pagina en unos minutos.</p>",
+             2: "<p><b>Prueba de correo ejecutada.</b> El resultado aparece abajo, en la primera fila.</p>"}.get(iniciado, "")
     return f"""<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Estado</title>
 <style>body{{font-family:Arial,sans-serif;margin:24px;color:#222;background:#FAFAF8}}table{{border-collapse:collapse;margin:12px 0 22px}}td,th{{border-bottom:1px solid #ddd;padding:7px 10px;text-align:left;font-size:13px;vertical-align:top;max-width:720px;word-break:break-word}}button{{background:#FF5100;color:#fff;border:0;border-radius:6px;padding:10px 14px;font-weight:bold;cursor:pointer;margin-right:8px}}</style></head><body>
 <h1>Estado del reporte</h1><p><a href="/">Reporte</a> &middot; <a href="/tickets">Tickets</a></p>{aviso}
 <table>{info}</table>
 <form method="post" action="/actualizar" style="display:inline"><button>Actualizar ahora</button></form>
-<form method="post" action="/actualizar?correo=1" style="display:inline"><button>Actualizar y enviar correo</button></form>
+<form method="post" action="/actualizar?correo=1" style="display:inline"><button>Actualizar y enviar correo a todos</button></form>
+<form method="post" action="/probar-correo" style="display:inline"><button>Enviar correo de prueba (solo avisos)</button></form>
 <h2>Ultimas ejecuciones</h2><table><tr><th>Fecha</th><th>Tipo</th><th>Resultado</th><th>Detalle</th></tr>{rows}</table></body></html>"""
 
 
@@ -236,6 +262,15 @@ def resumen(token: str, dia: str = "", formato: str = ""):
                "".join(f"<li>{k}: {v}</li>" for k, v in rows) + "</ul></body></html>"
         return HTMLResponse(body, headers={"Cache-Control": "no-store"})
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/probar-correo")
+def probar_correo(request: Request):
+    """Manda el correo de ayer solo a EMAIL_AVISOS, sin tocar a los directores."""
+    if not _authed(request):
+        return JSONResponse({"error": "no autorizado"}, status_code=401)
+    _send_daily_mail(True, only_test=True)
+    return RedirectResponse("/estado?iniciado=2", status_code=303)
 
 
 @app.post("/actualizar")
