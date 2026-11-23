@@ -44,11 +44,11 @@ class FakeHTTP:
 
     def post(self, url, json):
         self.calls += 1
-        f, t = json["timestamp"][0]["from"], json["timestamp"][0]["to"]
+        f, t = json["filters"][0]["value"], json["filters"][1]["value"]
         docs = [d for d in self.docs[json["action"]] if f <= d["Invoice"]["Date"][:10] <= t]
         p = int(json["page"])
         page = docs[(p - 1) * 25:p * 25]
-        key = "quotes" if json["action"] == "invoices" else json["action"]
+        key = json["action"]
         body = {"class": "GET", "action": json["action"], key: page}
         return type("R", (), {"status_code": 200, "text": "", "json": lambda self: body})()
 
@@ -94,6 +94,7 @@ def test_sync_calibra_y_no_cambia_totales(base):
     with db.connect(base) as con:
         after = con.execute("SELECT COUNT(*), ROUND(SUM(a),2) FROM lines").fetchone()[:]
     assert before[0] == after[0] and abs(before[1] - after[1]) < 0.5
+    assert r["verificacion"] == "coincide con el historico"
     assert http.calls > 4
 
 

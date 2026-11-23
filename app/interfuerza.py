@@ -58,8 +58,11 @@ class Interfuerza:
         """Recorre todas las paginas de 'invoices' o 'credit-notes' en un rango de fechas."""
         seen_first = None
         for page in range(1, max_pages + 1):
+            # Probado contra el API real (nov 2026): el filtro por fecha que funciona es
+            # "filters" sobre el campo Date; "timestamp" como lista devuelve cero registros.
             data = self.call({"class": "GET", "action": action, "page": str(page),
-                              "timestamp": [{"from": d_from, "to": d_to}]})
+                              "filters": [{"field": "Date", "type": ">=", "value": d_from},
+                                          {"field": "Date", "type": "<=", "value": d_to}]})
             recs = self._records(data)
             if not recs:
                 return

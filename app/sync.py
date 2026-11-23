@@ -121,6 +121,16 @@ def run_sync(api: Interfuerza, days_back: int | None = None, d_from: str | None 
         inv, cns, raw = fetch_range(api, d_from, d_to, mode)
         info.update({"modo_monto": mode, "facturas": len(raw), "lineas": len(inv), "lineas_nc": len(cns)})
         with db.connect(path) as con:
+            if inv and seed_hasta >= d_from:
+                # dias que ya estaban en el historico: comparar antes de sustituir
+                old = {r["d"]: r["s"] for r in con.execute(
+                    "SELECT d, ROUND(SUM(a),2) s FROM lines WHERE cn=0 AND d>=? AND d<=? GROUP BY d", (d_from, seed_hasta))}
+                new = {}
+                for x in inv:
+                    if x["d"] <= seed_hasta:
+                        new[x["d"]] = round(new.get(x["d"], 0) + x["a"], 2)
+                info["verificacion"] = {d: {"antes": old.get(d, 0), "api": new.get(d, 0)}
+                                        for d in sorted(set(old) | set(new)) if abs(old.get(d, 0) - new.get(d, 0)) > 0.05} or "coincide con el historico"
             if inv:
                 db.replace_range(con, d_from, d_to, 0, inv)
                 if cns:  # si el API no lista notas de credito, se conservan las que ya habia
