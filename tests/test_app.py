@@ -150,3 +150,31 @@ def test_web(tmp_path, monkeypatch):
         tk = c.get("/tickets")
         assert tk.status_code == 200 and '"hasta": "2026-11-17"' in tk.text
         assert "Estado del reporte" in c.get("/estado").text
+
+
+def test_correo_igual_al_reporte_anterior(base):
+    """Mismas cifras que el correo real enviado el 18-nov-2026 (datos del 17)."""
+    with db.connect(base) as con:
+        e = report.daily_email(db.all_lines(con), "2026-11-17", "https://x")
+    assert e["asunto"] == "Reporte ventas - Martes 17 de Noviembre, 2026"
+    t = e["texto"]
+    for frag in ("Venta neta: $627.75", "Tickets vendidos: 17", "Adicionales vendidos: 10",
+                 "Tickets vendidos: 507", "Adicionales vendidos: 296",
+                 "Tickets: 761 | Adicionales: 184", "Diferencia tickets: [-] -254 (-33.4%)",
+                 "Diferencia adicionales: [+] +112 (+60.9%)", "Tickets: 4,767 | Adicionales: 0",
+                 "Diferencia tickets: [-] -4,260 (-89.4%)", "Diferencia adicionales: [+] +296 (sin base)",
+                 "Octubre 2026 (2026-10-01 a 2026-10-17)", "Noviembre 2025 (2025-11-01 a 2025-11-17)"):
+        assert frag in t, frag
+
+
+def test_resumen_requiere_enlace_privado(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "r.db"))
+    monkeypatch.setenv("REPORT_PASSWORD", "clave-de-prueba")
+    monkeypatch.setenv("SESSION_SECRET", "secreto-de-prueba")
+    from fastapi.testclient import TestClient
+    from app import main
+    main._cache.clear()
+    with TestClient(main.app, follow_redirects=False) as c:
+        assert c.get("/resumen/malo").status_code == 404
+        r = c.get(f"/resumen/{main._resumen_token()}?dia=2026-11-17")
+        assert r.status_code == 200 and r.json()["venta_neta"] == 627.75 and r.json()["al_dia"] is False

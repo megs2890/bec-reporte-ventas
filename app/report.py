@@ -159,3 +159,101 @@ def daily_summary(lines: list[dict], day: str | None = None) -> dict:
 def fmt_date(day: str) -> str:
     d = datetime.strptime(day, "%Y-%m-%d")
     return f"{d.day} {MES[d.month - 1].lower()} {d.year}"
+
+
+# ---------- Correo diario (mismo formato del reporte que se enviaba antes) ----------
+DIAS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
+MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre",
+         "Octubre", "Noviembre", "Diciembre"]
+C2_TICKETS = {"TICKETS", "TICKET", "TOUR OPERADORAS / VENDEDORA"}
+C2_ADICIONALES = {"ADICIONALES"}
+
+
+def fecha_larga(day: str) -> str:
+    d = date.fromisoformat(day)
+    return f"{DIAS[d.weekday()]} {d.day} de {MESES[d.month - 1]}, {d.year}"
+
+
+def _units(lines, d_from: str, d_to: str) -> tuple[int, int]:
+    tk = ad = 0.0
+    for l in lines:
+        if l["c1"] != "TICKETS" or not (d_from <= l["d"] <= d_to):
+            continue
+        if l["c2"] in C2_TICKETS:
+            tk += signed(l, "u")
+        elif l["c2"] in C2_ADICIONALES:
+            ad += signed(l, "u")
+    return round(tk), round(ad)
+
+
+def _same_span(day: date, year: int, month: int) -> tuple[str, str]:
+    """Del 1 al mismo dia del mes indicado (recortado si ese mes es mas corto)."""
+    nxt = date(year + (month == 12), month % 12 + 1, 1)
+    last = (nxt - timedelta(days=1)).day
+    return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{min(day.day, last):02d}"
+
+
+def _dif(cur: int, prev: int) -> str:
+    d = cur - prev
+    sign = "[+]" if d >= 0 else "[-]"
+    pct = f"({d / prev * 100:+.1f}%)" if prev else "(sin base)"
+    return f"{sign} {d:+,} {pct}"
+
+
+def daily_email(lines: list[dict], day: str, public_url: str = "", actualizado: str = "") -> dict:
+    """Asunto y texto del correo diario para el dia indicado (normalmente ayer)."""
+    d = date.fromisoformat(day)
+    neta = sum(signed(l) for l in lines if l["d"] == day)
+    tk_d, ad_d = _units(lines, day, day)
+    m0 = f"{d.year:04d}-{d.month:02d}-01"
+    tk_m, ad_m = _units(lines, m0, day)
+    py, pm = (d.year - 1, 12) if d.month == 1 else (d.year, d.month - 1)
+    p0, p1 = _same_span(d, py, pm)
+    tk_p, ad_p = _units(lines, p0, p1)
+    y0, y1 = _same_span(d, d.year - 1, d.month)
+    tk_y, ad_y = _units(lines, y0, y1)
+    bar = "=" * 44
+    mes, mes_p = f"{MESES[d.month - 1]} {d.year}", f"{MESES[pm - 1]} {py}"
+    mes_y = f"{MESES[d.month - 1]} {d.year - 1}"
+    link = (f"El reporte interactivo esta en linea (se actualiza cada manana):\n{public_url}\n"
+            "Se entra con la clave del reporte.\n") if public_url else ""
+    text = f"""RESUMEN DEL DIA ANTERIOR
+{bar}
+  Fecha: {fecha_larga(day)}
+
+  Venta neta: ${neta:,.2f}
+  Tickets vendidos: {tk_d:,}
+  Adicionales vendidos: {ad_d:,}
+
+ACUMULADO DEL MES
+{bar}
+  Periodo: {m0} a {day}
+  Tickets vendidos: {tk_m:,}
+  Adicionales vendidos: {ad_m:,}
+
+COMPARATIVO VS MES ANTERIOR
+{bar}
+  {mes} ({m0} a {day}):
+     Tickets: {tk_m:,} | Adicionales: {ad_m:,}
+  {mes_p} ({p0} a {p1}):
+     Tickets: {tk_p:,} | Adicionales: {ad_p:,}
+  Diferencia tickets: {_dif(tk_m, tk_p)}
+  Diferencia adicionales: {_dif(ad_m, ad_p)}
+
+COMPARATIVO VS MISMO MES DEL ANO ANTERIOR
+{bar}
+  {mes} ({m0} a {day}):
+     Tickets: {tk_m:,} | Adicionales: {ad_m:,}
+  {mes_y} ({y0} a {y1}):
+     Tickets: {tk_y:,} | Adicionales: {ad_y:,}
+  Diferencia tickets: {_dif(tk_m, tk_y)}
+  Diferencia adicionales: {_dif(ad_m, ad_y)}
+
+---
+Filtro tickets: TICKETS / TICKETS,TICKET,TOUR OPERADORAS / VENDEDORA
+Filtro adicionales: TICKETS / ADICIONALES
+
+{link}
+Este correo fue generado automaticamente."""
+    return {"dia": day, "asunto": f"Reporte ventas - {fecha_larga(day)}", "texto": text,
+            "actualizado": actualizado, "venta_neta": round(neta, 2)}

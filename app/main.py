@@ -6,7 +6,7 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -177,7 +177,8 @@ def estado(request: Request, iniciado: int = 0):
                 "Formula de monto": db.get_meta(con, "modo_monto", "") or "sin calibrar",
                 "Programado": f"{config.SYNC_HOUR:02d}:{config.SYNC_MINUTE:02d} hora de Panama",
                 "Destinatarios del correo": str(len(config.EMAIL_TO)),
-                "Token de InterFuerza": "configurado" if config.env("IFX_TOKEN") else "FALTA"}
+                "Token de InterFuerza": "configurado" if config.env("IFX_TOKEN") else "FALTA",
+                "Enlace privado del resumen (para la tarea del correo)": f"{config.PUBLIC_URL}/resumen/{_resumen_token()}"}
         runs = db.last_runs(con)
     rows = "".join(f"<tr><td>{_h.escape(r['ts'])}</td><td>{_h.escape(r['kind'])}</td><td>{'ok' if r['ok'] else 'FALLO'}</td><td>{_h.escape(r['detail'] or '')}</td></tr>" for r in runs)
     info = "".join(f"<tr><td>{k}</td><td>{_h.escape(v)}</td></tr>" for k, v in meta.items())
@@ -189,6 +190,31 @@ def estado(request: Request, iniciado: int = 0):
 <form method="post" action="/actualizar" style="display:inline"><button>Actualizar ahora</button></form>
 <form method="post" action="/actualizar?correo=1" style="display:inline"><button>Actualizar y enviar correo</button></form>
 <h2>Ultimas ejecuciones</h2><table><tr><th>Fecha</th><th>Tipo</th><th>Resultado</th><th>Detalle</th></tr>{rows}</table></body></html>"""
+
+
+def _resumen_token() -> str:
+    """Clave del enlace privado del resumen, derivada del secreto de sesion (no requiere otra variable)."""
+    secret = config.env("SESSION_SECRET") or config.env("REPORT_PASSWORD")
+    return hmac.new(secret.encode(), b"resumen-diario", "sha256").hexdigest()[:40] if secret else ""
+
+
+@app.get("/resumen/{token}")
+def resumen(token: str, dia: str = ""):
+    """Resumen del dia anterior para la tarea que envia el correo. Solo responde con el enlace privado."""
+    good = _resumen_token()
+    if not good or not hmac.compare_digest(token.encode(), good.encode()):
+        return JSONResponse({"error": "no encontrado"}, status_code=404)
+    today = datetime.now(config.TZ).date()
+    with db.connect() as con:
+        lines = db.all_lines(con)
+        actualizado = db.get_meta(con, "actualizado", "")
+        datos_hasta = db.get_meta(con, "datos_hasta", "")
+    day = dia or (today - timedelta(days=1)).isoformat()
+    out = report.daily_email(lines, day, config.PUBLIC_URL, actualizado)
+    # "al_dia" indica si la base ya se actualizo hoy; si no, no conviene enviar el correo
+    out["al_dia"] = actualizado[:10] == today.isoformat() and datos_hasta >= day
+    out["datos_hasta"] = datos_hasta
+    return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/actualizar")
