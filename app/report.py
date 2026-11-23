@@ -216,9 +216,10 @@ def daily_email(lines: list[dict], day: str, public_url: str = "", actualizado: 
     bar = "=" * 44
     mes, mes_p = f"{MESES[d.month - 1]} {d.year}", f"{MESES[pm - 1]} {py}"
     mes_y = f"{MESES[d.month - 1]} {d.year - 1}"
-    link = (f"El reporte interactivo esta en linea (se actualiza cada manana):\n{public_url}\n"
-            + ("Se entra con la clave del reporte.\n" if con_clave else "")) if public_url else ""
-    text = f"""RESUMEN DEL DIA ANTERIOR
+    url = f"{public_url}/?dia={day}" if public_url else ""
+    link = (f"PARA VER EL REPORTE PRESIONE AQUI:\n{url}\n"
+            + ("Se entra con la clave del reporte.\n" if con_clave else "") + "\n") if url else ""
+    cuerpo = f"""RESUMEN DEL DIA ANTERIOR
 {bar}
   Fecha: {fecha_larga(day)}
 
@@ -254,8 +255,16 @@ COMPARATIVO VS MISMO MES DEL ANO ANTERIOR
 Filtro tickets: TICKETS / TICKETS,TICKET,TOUR OPERADORAS / VENDEDORA
 Filtro adicionales: TICKETS / ADICIONALES
 
-{link}
 Este correo fue generado automaticamente."""
+    text = link + cuerpo
+    esc = cuerpo.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    boton = (f'<p style="margin:0 0 22px"><a href="{url}" style="display:inline-block;background:#FF5100;color:#ffffff;'
+             f'font-size:20px;font-weight:bold;padding:16px 26px;border-radius:8px;text-decoration:none">'
+             f'Para ver el reporte presione aqu&iacute;</a></p>'
+             + ('<p style="margin:-12px 0 22px;font-size:13px;color:#5A5650">Se entra con la clave del reporte.</p>' if con_clave else "")
+             ) if url else ""
+    html = (f'<div style="font-family:Arial,Helvetica,sans-serif;color:#222222;max-width:640px">{boton}'
+            f'<pre style="font-family:Menlo,Consolas,monospace;font-size:14px;line-height:1.45;white-space:pre-wrap;margin:0">{esc}</pre></div>')
     # Campos cortos, ya con formato, para armar el correo sin copiar el texto largo.
     # "control" es la suma de las cantidades mas la venta neta en centavos: sirve para
     # comprobar que los valores se leyeron bien.
@@ -268,5 +277,5 @@ Este correo fue generado automaticamente."""
         "dif_tk_anio": _dif(tk_m, tk_y), "dif_ad_anio": _dif(ad_m, ad_y),
     }
     control = tk_d + ad_d + tk_m + ad_m + tk_p + ad_p + tk_y + ad_y + round(neta * 100)
-    return {"dia": day, "asunto": f"Reporte ventas - {fecha_larga(day)}", "texto": text,
+    return {"dia": day, "asunto": f"Reporte ventas - {fecha_larga(day)}", "texto": text, "html": html,
             "actualizado": actualizado, "venta_neta": round(neta, 2), "campos": campos, "control": control}

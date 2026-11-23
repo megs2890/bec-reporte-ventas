@@ -209,6 +209,7 @@ def test_correo_diario_por_smtp(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "m.db"))
     monkeypatch.setattr(config, "EMAIL_PROVIDER", "smtp")
     monkeypatch.setattr(config, "EMAIL_FROM", "Reporte <x@gmail.com>")
+    monkeypatch.setattr(config, "PUBLIC_URL", "https://reporte.ejemplo.com")
     monkeypatch.setattr(config, "EMAIL_TO", ["d1@ejemplo.com", "d2@ejemplo.com"])
     monkeypatch.setattr(config, "EMAIL_AVISOS", ["yo@ejemplo.com"])
     for k, v in {"SMTP_HOST": "smtp.gmail.com", "SMTP_USER": "x@gmail.com", "SMTP_PASSWORD": "p"}.items():
@@ -228,7 +229,11 @@ def test_correo_diario_por_smtp(tmp_path, monkeypatch):
     db.init(config.DB_PATH)
     r = main._send_daily_mail(True, only_test=True)
     assert "prueba" in r["correo"] and sent[-1]["To"] == "yo@ejemplo.com" and sent[-1]["Subject"].startswith("[PRUEBA] Reporte ventas - ")
-    assert "RESUMEN DEL DIA ANTERIOR" in sent[-1].get_content()
+    plano = sent[-1].get_body(("plain",)).get_content()
+    html = sent[-1].get_body(("html",)).get_content()
+    assert "RESUMEN DEL DIA ANTERIOR" in plano and plano.startswith("PARA VER EL REPORTE PRESIONE AQUI")
+    assert "Para ver el reporte presione aqu" in html and html.index("presione") < html.index("RESUMEN DEL DIA ANTERIOR")
+    assert "/?dia=" in html and "/?dia=" in plano
     r = main._send_daily_mail(True)
     assert sent[-1]["To"] == "d1@ejemplo.com, d2@ejemplo.com" and not sent[-1]["Subject"].startswith("[PRUEBA]")
     r = main._send_daily_mail(False, "HTTP 401")

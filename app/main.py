@@ -96,7 +96,7 @@ def _send_daily_mail(sync_ok: bool, error: str = "", only_test: bool = False) ->
             e = report.daily_email(lines, day, config.PUBLIC_URL, actualizado, con_clave=not _open_access())
             to = config.EMAIL_AVISOS if only_test else config.EMAIL_TO
             subject = ("[PRUEBA] " if only_test else "") + e["asunto"]
-            out["correo"] = mailer.send(subject, text=e["texto"], to=to) + (" (prueba)" if only_test else "")
+            out["correo"] = mailer.send(subject, html=e["html"], text=e["texto"], to=to) + (" (prueba)" if only_test else "")
         with db.connect() as con:
             db.log_run(con, ts, "correo", True, out["correo"])
     except Exception as ex:
