@@ -185,3 +185,21 @@ def test_resumen_requiere_enlace_privado(tmp_path, monkeypatch):
         with TestClient(main.app) as c2:
             page = c2.get(f"/resumen/{main._resumen_token()}?dia=2026-11-17&formato=lista").text
         assert "<li>tk_mes: 507</li>" in page and "<li>dif_ad_anio: [+] +296 (sin base)</li>" in page
+
+
+def test_acceso_abierto(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "a.db"))
+    monkeypatch.setenv("REPORT_PASSWORD", "clave-de-prueba")
+    monkeypatch.setenv("ACCESO_ABIERTO", "1")
+    from fastapi.testclient import TestClient
+    from app import main
+    main._cache.clear()
+    with TestClient(main.app, follow_redirects=False) as c:
+        assert c.get("/").status_code == 200 and c.get("/tickets").status_code == 200
+        assert c.get("/estado").status_code == 303 and c.post("/actualizar").status_code == 401
+        assert "Disallow: /" in c.get("/robots.txt").text
+        r = c.get(f"/resumen/{main._resumen_token()}?dia=2026-11-17")
+        assert r.status_code == 200 and "Se entra con la clave" not in r.json()["texto"]
+    monkeypatch.delenv("ACCESO_ABIERTO")
+    with TestClient(main.app, follow_redirects=False) as c:
+        assert c.get("/").status_code == 303

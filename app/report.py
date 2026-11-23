@@ -200,7 +200,8 @@ def _dif(cur: int, prev: int) -> str:
     return f"{sign} {d:+,} {pct}"
 
 
-def daily_email(lines: list[dict], day: str, public_url: str = "", actualizado: str = "") -> dict:
+def daily_email(lines: list[dict], day: str, public_url: str = "", actualizado: str = "",
+                con_clave: bool = True) -> dict:
     """Asunto y texto del correo diario para el dia indicado (normalmente ayer)."""
     d = date.fromisoformat(day)
     neta = sum(signed(l) for l in lines if l["d"] == day)
@@ -216,7 +217,7 @@ def daily_email(lines: list[dict], day: str, public_url: str = "", actualizado: 
     mes, mes_p = f"{MESES[d.month - 1]} {d.year}", f"{MESES[pm - 1]} {py}"
     mes_y = f"{MESES[d.month - 1]} {d.year - 1}"
     link = (f"El reporte interactivo esta en linea (se actualiza cada manana):\n{public_url}\n"
-            "Se entra con la clave del reporte.\n") if public_url else ""
+            + ("Se entra con la clave del reporte.\n" if con_clave else "")) if public_url else ""
     text = f"""RESUMEN DEL DIA ANTERIOR
 {bar}
   Fecha: {fecha_larga(day)}
