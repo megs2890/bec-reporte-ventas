@@ -35,6 +35,12 @@ def _signer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret or "sin-configurar", salt="bec-reporte")
 
 
+def _open_access() -> bool:
+    """ACCESO_ABIERTO=1: el reporte y la vista de tickets se abren con solo el enlace, sin clave.
+    La pagina Estado y el boton de actualizar siguen pidiendo la clave."""
+    return config.env("ACCESO_ABIERTO") == "1"
+
+
 def _authed(request: Request) -> bool:
     if not config.env("REPORT_PASSWORD"):
         return False  # sin clave configurada no se muestra nada
@@ -116,7 +122,14 @@ app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 
 def _gz(body: bytes) -> Response:
     return Response(body, media_type="text/html; charset=utf-8",
-                    headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"})
+                    headers={"Content-Encoding": "gzip", "Cache-Control": "no-store",
+                             "X-Robots-Tag": "noindex, nofollow"})
+
+
+@app.get("/robots.txt")
+def robots():
+    # el reporte no debe aparecer en buscadores
+    return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
 
 
 @app.get("/salud")
@@ -154,14 +167,14 @@ def salir():
 
 @app.get("/")
 def home(request: Request):
-    if not _authed(request):
+    if not _open_access() and not _authed(request):
         return RedirectResponse("/entrar", status_code=303)
     return _gz(_state()["page"])
 
 
 @app.get("/tickets")
 def tickets(request: Request):
-    if not _authed(request):
+    if not _open_access() and not _authed(request):
         return RedirectResponse("/entrar", status_code=303)
     return _gz(_state()["tickets"])
 
@@ -210,7 +223,7 @@ def resumen(token: str, dia: str = "", formato: str = ""):
         actualizado = db.get_meta(con, "actualizado", "")
         datos_hasta = db.get_meta(con, "datos_hasta", "")
     day = dia or (today - timedelta(days=1)).isoformat()
-    out = report.daily_email(lines, day, config.PUBLIC_URL, actualizado)
+    out = report.daily_email(lines, day, config.PUBLIC_URL, actualizado, con_clave=not _open_access())
     # "al_dia" indica si la base ya se actualizo hoy; si no, no conviene enviar el correo
     out["al_dia"] = actualizado[:10] == today.isoformat() and datos_hasta >= day
     out["datos_hasta"] = datos_hasta
