@@ -1,0 +1,429 @@
+const LINES = DATA.lines;
+const MONTHS = DATA.months;
+const CATS_L1 = DATA.catsL1;
+const CATS_L2_BY_L1 = DATA.catsL2ByL1;
+
+const palette = ["#16a085","#2980b9","#e67e22","#8e44ad","#27ae60","#c0392b","#f39c12","#34495e","#1abc9c","#d35400"];
+
+function fmtUSD(v){ return "$" + (Number(v)||0).toLocaleString("es-PA", {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtNum(v){ return (Number(v)||0).toLocaleString("es-PA", {maximumFractionDigits:2}); }
+function fmtPct(v){ return (Number(v)||0).toLocaleString("es-PA", {maximumFractionDigits:1}) + "%"; }
+function monthLabel(m) {
+  if (!m) return m;
+  const [y, mo] = m.split("-");
+  const names = ["", "Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  return `${names[parseInt(mo,10)]} ${y}`;
+}
+function trunc(s, n) { return (s||"").length > n ? s.slice(0, n-2) + ".." : s; }
+
+let state = { dateFrom: "", dateTo: "", l1: "", l2: "", search: "", sortKey: "neto", sortDesc: true };
+
+const elMonth = document.getElementById("filterMonth");
+const elFrom = document.getElementById("filterFrom");
+const elTo = document.getElementById("filterTo");
+const elL1 = document.getElementById("filterL1");
+const elL2 = document.getElementById("filterL2");
+const elSearch = document.getElementById("search");
+const elStatus = document.getElementById("filterStatus");
+MONTHS.forEach(m => elMonth.add(new Option(monthLabel(m), m)));
+CATS_L1.forEach(c => elL1.add(new Option(c, c)));
+
+// limites de fecha basados en data disponible
+const ALL_DATES = LINES.map(l => l.d).filter(Boolean).sort();
+const MIN_DATE = ALL_DATES[0] || "";
+const MAX_DATE = ALL_DATES[ALL_DATES.length - 1] || "";
+if (MIN_DATE) { elFrom.min = MIN_DATE; elTo.min = MIN_DATE; }
+if (MAX_DATE) { elFrom.max = MAX_DATE; elTo.max = MAX_DATE; }
+
+function shiftByMonth(dateStr, months) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const targetMonth = m + months;
+  const targetYear = y + Math.floor((targetMonth - 1) / 12);
+  const targetMonthNorm = ((targetMonth - 1) % 12 + 12) % 12 + 1;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonthNorm, 0)).getUTCDate();
+  const targetDay = Math.min(d, lastDay);
+  return `${targetYear}-${String(targetMonthNorm).padStart(2,'0')}-${String(targetDay).padStart(2,'0')}`;
+}
+
+function formatDateRange(from, to) {
+  if (!from && !to) return "";
+  return (from || "...") + " a " + (to || "...");
+}
+
+function refreshL2Options() {
+  const prev = state.l2;
+  elL2.innerHTML = '<option value="">Todas las sub-categorias</option>';
+  let l2s;
+  if (state.l1 && CATS_L2_BY_L1[state.l1]) {
+    l2s = CATS_L2_BY_L1[state.l1];
+  } else {
+    const set = new Set();
+    Object.values(CATS_L2_BY_L1).forEach(arr => arr.forEach(x => set.add(x)));
+    l2s = [...set].sort();
+  }
+  l2s.forEach(c => elL2.add(new Option(c, c)));
+  if (l2s.includes(prev)) { elL2.value = prev; state.l2 = prev; }
+  else { elL2.value = ""; state.l2 = ""; }
+}
+refreshL2Options();
+
+function applyFilters(opts) {
+  opts = opts || {};
+  const from = opts.from !== undefined ? opts.from : state.dateFrom;
+  const to = opts.to !== undefined ? opts.to : state.dateTo;
+  const ignoreCategory = opts.ignoreCategory === true;
+  return LINES.filter(l => {
+    if (from && l.d < from) return false;
+    if (to && l.d > to) return false;
+    if (!ignoreCategory) {
+      if (state.l1 && l.c1 !== state.l1) return false;
+      if (state.l2 && l.c2 !== state.l2) return false;
+    }
+    return true;
+  });
+}
+
+function getPreviousPeriod() {
+  if (!state.dateFrom || !state.dateTo) return null;
+  return { from: shiftByMonth(state.dateFrom, -1), to: shiftByMonth(state.dateTo, -1) };
+}
+
+function computeKPIs(rows) {
+  const invSet = new Set();
+  let bruto = 0, cn = 0, units = 0, tax = 0;
+  const prodSet = new Set();
+  const catL1Set = new Set();
+  rows.forEach(l => {
+    if (l.cn) { cn += l.a; }
+    else { bruto += l.a; if (l.id) invSet.add(l.id); units += l.u; }
+    if (l.cod) prodSet.add(l.cod);
+    if (l.c1) catL1Set.add(l.c1);
+    tax += l.t;
+  });
+  const neto = bruto - cn;
+  const fac = invSet.size;
+  return { bruto, cn, neto, fac, ticket: fac ? bruto/fac : 0, units, tax,
+            prodCount: prodSet.size, l1Count: catL1Set.size };
+}
+
+function renderKPIs(k) {
+  const defs = [
+    {label:"Ventas brutas", value:fmtUSD(k.bruto), cls:""},
+    {label:"Notas de credito", value:fmtUSD(k.cn), cls:"cn"},
+    {label:"Ventas netas", value:fmtUSD(k.neto), cls:"accent"},
+    {label:"# Facturas", value:fmtNum(k.fac), cls:"neutral"},
+    {label:"Ticket promedio", value:fmtUSD(k.ticket), cls:"neutral"},
+    {label:"Unidades", value:fmtNum(k.units), cls:"neutral"},
+    {label:"Productos", value:fmtNum(k.prodCount), cls:"neutral"},
+    {label:"ITBMS estimado", value:fmtUSD(k.tax), cls:"neutral"},
+  ];
+  document.getElementById("kpis").innerHTML = defs.map(d =>
+    `<div class="kpi ${d.cls}"><div class="label">${d.label}</div><div class="value">${d.value}</div></div>`
+  ).join("");
+}
+
+function renderSubtotal(k) {
+  const sec = document.getElementById("subtotalSection");
+  if (!state.l1 && !state.l2) { sec.style.display = "none"; return; }
+  sec.style.display = "block";
+  document.getElementById("subtotalTitle").textContent =
+    "Subtotal: " + (state.l2 ? `${state.l1 || "Todas"} › ${state.l2}` : state.l1);
+  const totalSansCat = applyFilters({ ignoreCategory: true })
+    .reduce((acc, l) => { if (l.cn) acc.cn += l.a; else acc.bruto += l.a; return acc; }, {bruto:0, cn:0});
+  const totalNeto = totalSansCat.bruto - totalSansCat.cn;
+  const pctBruto = totalSansCat.bruto ? (k.bruto / totalSansCat.bruto * 100) : 0;
+  const pctNeto = totalNeto ? (k.neto / totalNeto * 100) : 0;
+  const stats = [
+    {label:"Ventas brutas", value: fmtUSD(k.bruto)},
+    {label:"Notas de credito", value: fmtUSD(k.cn)},
+    {label:"Ventas netas", value: fmtUSD(k.neto)},
+    {label:"% del total bruto", value: fmtPct(pctBruto)},
+    {label:"% del total neto", value: fmtPct(pctNeto)},
+    {label:"Unidades", value: fmtNum(k.units)},
+    {label:"Productos", value: fmtNum(k.prodCount)},
+    {label:"# Facturas", value: fmtNum(k.fac)},
+  ];
+  document.getElementById("subtotalGrid").innerHTML = stats.map(s =>
+    `<div class="stat"><div class="label">${s.label}</div><div class="value">${s.value}</div></div>`
+  ).join("");
+}
+
+let chartTopProd, chartCatL1, chartTrend, chartCatL2;
+
+function aggregateByProduct(rows) {
+  const m = {};
+  rows.forEach(l => {
+    const k = l.cod;
+    if (!m[k]) m[k] = {codigo: l.cod, nombre: l.nom, marca: l.mar,
+                       category_l1: l.c1, category_l2: l.c2,
+                       unidades: 0, bruto: 0, notas_credito: 0, neto: 0};
+    if (l.cn) m[k].notas_credito += l.a;
+    else { m[k].bruto += l.a; m[k].unidades += l.u; }
+  });
+  Object.values(m).forEach(p => { p.neto = p.bruto - p.notas_credito; });
+  return Object.values(m).sort((a,b) => b.neto - a.neto);
+}
+
+function aggregateByL1(rows) {
+  const m = {};
+  rows.forEach(l => {
+    if (!m[l.c1]) m[l.c1] = {cat: l.c1, bruto: 0, cn: 0};
+    if (l.cn) m[l.c1].cn += l.a; else m[l.c1].bruto += l.a;
+  });
+  return Object.values(m).map(x => ({cat: x.cat, monto: x.bruto - x.cn}))
+                          .sort((a,b) => b.monto - a.monto);
+}
+
+function aggregateByL2(rows) {
+  const m = {};
+  rows.forEach(l => {
+    const key = l.c1 + " / " + l.c2;
+    if (!m[key]) m[key] = {cat: key, bruto: 0, cn: 0};
+    if (l.cn) m[key].cn += l.a; else m[key].bruto += l.a;
+  });
+  return Object.values(m).map(x => ({cat: x.cat, monto: x.bruto - x.cn}))
+                          .sort((a,b) => b.monto - a.monto);
+}
+
+function aggregateByPeriod(rows, byDay) {
+  const m = {};
+  rows.forEach(l => {
+    const k = byDay ? l.d : l.m;
+    if (!k) return;
+    if (!m[k]) m[k] = {key: k, bruto: 0, cn: 0};
+    if (l.cn) m[k].cn += l.a; else m[k].bruto += l.a;
+  });
+  return Object.values(m).sort((a,b) => a.key.localeCompare(b.key));
+}
+
+function updateCharts(rows) {
+  const top = aggregateByProduct(rows).slice(0, 15).reverse();
+  if (!chartTopProd) {
+    chartTopProd = new Chart(document.getElementById("chartTopProd"), {
+      type: "bar", data: { labels: [], datasets: [{ data: [], backgroundColor: "#16a085" }] },
+      options: { indexAxis:"y", responsive:true, animation:false,
+                  plugins:{legend:{display:false}, tooltip:{callbacks:{label:(c)=>fmtUSD(c.parsed.x)}}},
+                  scales:{x:{ticks:{callback:(v)=>"$"+(v/1000).toFixed(1)+"k"}}}}
+    });
+  }
+  chartTopProd.data.labels = top.map(p => trunc(p.nombre, 32));
+  chartTopProd.data.datasets[0].data = top.map(p => p.neto);
+  chartTopProd.update();
+
+  const l1agg = aggregateByL1(rows);
+  if (!chartCatL1) {
+    chartCatL1 = new Chart(document.getElementById("chartCatL1"), {
+      type: "doughnut", data: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
+      options: { responsive:true, animation:false,
+                  plugins:{legend:{position:"right", labels:{boxWidth:12, font:{size:11}}},
+                           tooltip:{callbacks:{label:(c)=>c.label+": "+fmtUSD(c.parsed)}}}}
+    });
+  }
+  chartCatL1.data.labels = l1agg.map(c => c.cat);
+  chartCatL1.data.datasets[0].data = l1agg.map(c => c.monto);
+  chartCatL1.data.datasets[0].backgroundColor = l1agg.map((_, i) => palette[i % palette.length]);
+  chartCatL1.update();
+
+  // tendencia diaria si el rango cae todo en un solo mes; si no, mensual
+  const fromMonth = state.dateFrom ? state.dateFrom.slice(0,7) : "";
+  const toMonth = state.dateTo ? state.dateTo.slice(0,7) : "";
+  const trendByDay = !!(state.dateFrom && state.dateTo && fromMonth === toMonth);
+  const trend = aggregateByPeriod(rows, trendByDay);
+  document.getElementById("trendTitle").textContent =
+    trendByDay ? "Tendencia diaria (" + monthLabel(fromMonth) + ")" : "Tendencia mensual";
+  if (!chartTrend) {
+    chartTrend = new Chart(document.getElementById("chartTrend"), {
+      type: "bar", data: { labels: [], datasets: [{ label:"Ventas netas", data: [], backgroundColor:"#2980b9" }] },
+      options: { responsive:true, animation:false,
+                  plugins:{legend:{display:false}, tooltip:{callbacks:{label:(c)=>fmtUSD(c.parsed.y)}}},
+                  scales:{y:{ticks:{callback:(v)=>"$"+(v/1000).toFixed(1)+"k"}}}}
+    });
+  }
+  chartTrend.data.labels = trend.map(t => trendByDay ? t.key.slice(8) : monthLabel(t.key));
+  chartTrend.data.datasets[0].data = trend.map(t => t.bruto - t.cn);
+  chartTrend.update();
+
+  const l2agg = aggregateByL2(rows).slice(0, 15).reverse();
+  if (!chartCatL2) {
+    chartCatL2 = new Chart(document.getElementById("chartCatL2"), {
+      type: "bar", data: { labels: [], datasets: [{ data: [], backgroundColor: "#2980b9" }] },
+      options: { indexAxis:"y", responsive:true, animation:false,
+                  plugins:{legend:{display:false}, tooltip:{callbacks:{label:(c)=>fmtUSD(c.parsed.x)}}},
+                  scales:{x:{ticks:{callback:(v)=>"$"+(v/1000).toFixed(1)+"k"}}}}
+    });
+  }
+  chartCatL2.data.labels = l2agg.map(c => trunc(c.cat, 36));
+  chartCatL2.data.datasets[0].data = l2agg.map(c => c.monto);
+  chartCatL2.update();
+}
+
+function updateTable(rows) {
+  const products = aggregateByProduct(rows);
+  const q = state.search.toLowerCase();
+  let filtered = products.filter(p => !q ||
+    [p.codigo, p.nombre, p.marca, p.category_l1, p.category_l2].join(" ").toLowerCase().includes(q));
+
+  // Totales del subset filtrado (para calcular el % de cada producto sobre el total)
+  let totalUnidades = 0, totalBruto = 0, totalCN = 0, totalNeto = 0;
+  filtered.forEach(p => {
+    totalUnidades += p.unidades;
+    totalBruto += p.bruto;
+    totalCN += p.notas_credito;
+    totalNeto += p.neto;
+  });
+  filtered.forEach(p => { p.pct = totalNeto ? (p.neto / totalNeto * 100) : 0; });
+
+  filtered.sort((a, b) => {
+    const av = a[state.sortKey], bv = b[state.sortKey];
+    if (typeof av === "number") return state.sortDesc ? bv - av : av - bv;
+    return state.sortDesc ? String(bv).localeCompare(String(av)) : String(av).localeCompare(String(bv));
+  });
+
+  document.getElementById("rowCount").textContent = filtered.length + " productos";
+
+  const showLimit = 500;
+  const slice = filtered.slice(0, showLimit);
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = slice.map(p => `<tr>
+    <td>${p.codigo}</td>
+    <td>${p.nombre}</td>
+    <td>${p.marca||""}</td>
+    <td>${p.category_l1}</td>
+    <td>${p.category_l2}</td>
+    <td class="num">${fmtNum(p.unidades)}</td>
+    <td class="num">${fmtUSD(p.bruto)}</td>
+    <td class="num">${fmtUSD(p.notas_credito)}</td>
+    <td class="num"><strong>${fmtUSD(p.neto)}</strong></td>
+    <td class="num pct-cell">${totalNeto ? fmtPct(p.pct) : "-"}</td>
+  </tr>`).join("");
+  if (filtered.length > showLimit) {
+    tbody.innerHTML += `<tr><td colspan="10" style="text-align:center;color:#7f8c8d;padding:14px">
+      Mostrando ${showLimit} de ${filtered.length}. Aplica filtros o busqueda para refinar.</td></tr>`;
+  }
+
+  // Footer con totales del subset
+  const tfoot = document.getElementById("tblFoot");
+  tfoot.innerHTML = filtered.length ? `<tr>
+    <td colspan="5" style="text-align:right">TOTAL (${filtered.length} productos)</td>
+    <td class="num">${fmtNum(totalUnidades)}</td>
+    <td class="num">${fmtUSD(totalBruto)}</td>
+    <td class="num">${fmtUSD(totalCN)}</td>
+    <td class="num">${fmtUSD(totalNeto)}</td>
+    <td class="num pct-cell">100.0%</td>
+  </tr>` : "";
+
+  document.querySelectorAll("th").forEach(th => {
+    th.classList.toggle("sorted", th.dataset.key === state.sortKey);
+    th.classList.toggle("asc", th.dataset.key === state.sortKey && !state.sortDesc);
+  });
+}
+
+function updateFilterStatus() {
+  const parts = [];
+  if (state.dateFrom || state.dateTo) parts.push(formatDateRange(state.dateFrom, state.dateTo));
+  if (state.l1) parts.push(state.l1);
+  if (state.l2) parts.push(state.l2);
+  if (parts.length) {
+    elStatus.textContent = "Filtros: " + parts.join(" • ");
+    elStatus.style.display = "inline-block";
+  } else {
+    elStatus.style.display = "none";
+  }
+}
+
+function renderComparison() {
+  const sec = document.getElementById("comparisonSection");
+  const prev = getPreviousPeriod();
+  if (!prev) { sec.style.display = "none"; return; }
+  sec.style.display = "block";
+
+  const cur = computeKPIs(applyFilters());
+  const pre = computeKPIs(applyFilters({ from: prev.from, to: prev.to }));
+
+  document.getElementById("cmpCurrentLabel").textContent = formatDateRange(state.dateFrom, state.dateTo);
+  document.getElementById("cmpPrevLabel").textContent = formatDateRange(prev.from, prev.to);
+
+  function delta(cur, pre, isMoney) {
+    const diff = cur - pre;
+    const pct = pre ? (diff / pre * 100) : (cur ? 100 : 0);
+    const cls = Math.abs(diff) < 0.005 ? "flat" : (diff > 0 ? "up" : "down");
+    const arrow = diff > 0 ? "↑" : (diff < 0 ? "↓" : "→");
+    const fmt = isMoney ? fmtUSD : fmtNum;
+    return { cls, arrow, pct, diff, txt: `${arrow} ${pct.toLocaleString("es-PA",{maximumFractionDigits:1})}%  (${diff>0?"+":""}${fmt(diff)})` };
+  }
+
+  const rows = [
+    {label: "Ventas brutas",  cur: cur.bruto,   pre: pre.bruto,   money: true},
+    {label: "Notas de credito", cur: cur.cn,    pre: pre.cn,      money: true},
+    {label: "Ventas netas",   cur: cur.neto,    pre: pre.neto,    money: true},
+    {label: "# Facturas",     cur: cur.fac,     pre: pre.fac,     money: false},
+    {label: "Ticket promedio", cur: cur.ticket, pre: pre.ticket,  money: true},
+    {label: "Unidades",       cur: cur.units,   pre: pre.units,   money: false},
+    {label: "Productos",      cur: cur.prodCount, pre: pre.prodCount, money: false},
+  ];
+  document.getElementById("comparisonGrid").innerHTML = rows.map(r => {
+    const fmt = r.money ? fmtUSD : fmtNum;
+    const d = delta(r.cur, r.pre, r.money);
+    return `<div class="cmp-stat">
+      <div class="label">${r.label}</div>
+      <div class="values"><span class="cur">${fmt(r.cur)}</span><span class="pre">vs ${fmt(r.pre)}</span></div>
+      <div class="delta ${d.cls}">${d.txt}</div>
+    </div>`;
+  }).join("");
+}
+
+function refresh() {
+  const rows = applyFilters();
+  const k = computeKPIs(rows);
+  renderKPIs(k);
+  renderComparison();
+  renderSubtotal(k);
+  updateCharts(rows);
+  updateTable(rows);
+  updateFilterStatus();
+}
+
+function setMonthRange(monthStr) {
+  // Setea dateFrom/dateTo a los limites del mes YYYY-MM
+  if (!monthStr) { state.dateFrom = ""; state.dateTo = ""; elFrom.value = ""; elTo.value = ""; return; }
+  const [y, mo] = monthStr.split("-").map(Number);
+  const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  state.dateFrom = `${monthStr}-01`;
+  state.dateTo = `${monthStr}-${String(last).padStart(2,'0')}`;
+  elFrom.value = state.dateFrom;
+  elTo.value = state.dateTo;
+}
+
+elMonth.addEventListener("change", () => { setMonthRange(elMonth.value); refresh(); });
+elFrom.addEventListener("change", () => {
+  state.dateFrom = elFrom.value;
+  // si el rango ya no coincide con un mes completo, limpiar el select de mes
+  elMonth.value = "";
+  refresh();
+});
+elTo.addEventListener("change", () => {
+  state.dateTo = elTo.value;
+  elMonth.value = "";
+  refresh();
+});
+elL1.addEventListener("change", () => { state.l1 = elL1.value; refreshL2Options(); refresh(); });
+elL2.addEventListener("change", () => { state.l2 = elL2.value; refresh(); });
+elSearch.addEventListener("input", () => { state.search = elSearch.value; updateTable(applyFilters()); });
+document.getElementById("btnClear").addEventListener("click", () => {
+  state.dateFrom = ""; state.dateTo = ""; state.l1 = ""; state.l2 = ""; state.search = "";
+  elMonth.value = ""; elFrom.value = ""; elTo.value = ""; elL1.value = ""; elSearch.value = "";
+  refreshL2Options();
+  refresh();
+});
+document.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.key;
+  if (state.sortKey === k) state.sortDesc = !state.sortDesc;
+  else { state.sortKey = k; state.sortDesc = true; }
+  updateTable(applyFilters());
+}));
+
+refresh();
+</script>
+</body>
+</html>

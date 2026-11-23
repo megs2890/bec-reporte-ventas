@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Reporte de ventas - Todos los meses disponibles</title>
+<script src="/static/chart.umd.js"></script>
+<style>
+  :root {
+    --brand: #16a085;
+    --brand2: #2980b9;
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --text: #2c3e50;
+    --muted: #7f8c8d;
+    --border: #e1e7ed;
+    --accent: #e67e22;
+    --danger: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         margin: 0; background: var(--bg); color: var(--text); }
+  header { background: linear-gradient(135deg, var(--brand2), var(--brand));
+           color: white; padding: 28px 36px; }
+  header h1 { margin: 0; font-size: 26px; font-weight: 600; }
+  header p { margin: 6px 0 0; opacity: .85; font-size: 14px; }
+  main { padding: 24px 36px 60px; max-width: 1400px; margin: 0 auto; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 14px; margin-bottom: 28px; }
+  .kpi { background: var(--card); padding: 16px 18px; border-radius: 10px;
+         box-shadow: 0 1px 3px rgba(0,0,0,.06); border-left: 4px solid var(--brand); }
+  .kpi.cn { border-left-color: var(--danger); }
+  .kpi.neutral { border-left-color: var(--brand2); }
+  .kpi.accent { border-left-color: var(--accent); }
+  .kpi .label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+                color: var(--muted); margin-bottom: 6px; }
+  .kpi .value { font-size: 22px; font-weight: 600; }
+  .kpi .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  .grid.full { grid-template-columns: 1fr; }
+  .card { background: var(--card); border-radius: 10px; padding: 18px 22px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600;
+             color: var(--text); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  canvas { max-height: 360px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+             margin-bottom: 10px; }
+  .toolbar input, .toolbar select {
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; background: white; color: var(--text); min-width: 160px;
+  }
+  .toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--brand2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 9px 8px; border-bottom: 2px solid var(--border);
+       cursor: pointer; user-select: none; color: var(--muted);
+       font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .3px; }
+  th:hover { color: var(--brand2); }
+  th.sorted::after { content: " \25BC"; font-size: 9px; }
+  th.sorted.asc::after { content: " \25B2"; }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--border); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.pct-cell { color: var(--brand2); font-weight: 600; }
+  tr:hover { background: #f9fbfc; }
+  tfoot tr { background: #ecf4f8; font-weight: 700; }
+  tfoot td { border-top: 2px solid var(--brand2); border-bottom: none; padding: 12px 8px; }
+  .footer { margin-top: 30px; color: var(--muted); font-size: 12px; text-align: center; }
+  .mock-banner { background: #fff5e1; border: 1px solid #f39c12; color: #8a5a00;
+                  padding: 10px 16px; border-radius: 6px; margin-bottom: 20px;
+                  font-size: 13px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px;
+          font-size: 11px; background: #ecf0f1; color: var(--muted); }
+  .filters { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end;
+             background: var(--card); padding: 16px 18px; border-radius: 10px;
+             box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 20px; }
+  .filters .field { display: flex; flex-direction: column; gap: 4px; }
+  .filters label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+                   color: var(--muted); font-weight: 600; }
+  .filters select, .filters input[type="date"] {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; background: white; color: var(--text); min-width: 160px;
+    font-family: inherit;
+  }
+  .filters select:focus, .filters input[type="date"]:focus { outline: none; border-color: var(--brand2); }
+  .filters button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px;
+                    background: white; color: var(--muted); cursor: pointer; font-size: 13px; }
+  .filters button:hover { color: var(--brand2); border-color: var(--brand2); }
+  .filters .active-chip { background: var(--brand); color: white; padding: 4px 10px;
+                          border-radius: 12px; font-size: 12px; }
+  .subtotal-card { background: linear-gradient(135deg, #fff4e6, #ffe8cc);
+                   border: 1px solid #f5b041; border-radius: 10px; padding: 18px 22px;
+                   margin-bottom: 20px; }
+  .subtotal-card h3 { margin: 0 0 12px; font-size: 14px; color: #8a5a00;
+                      text-transform: uppercase; letter-spacing: .5px; }
+  .subtotal-card .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                       gap: 14px; }
+  .subtotal-card .stat .label { font-size: 11px; color: #8a5a00; text-transform: uppercase;
+                                letter-spacing: .4px; }
+  .subtotal-card .stat .value { font-size: 18px; font-weight: 600; color: #5d3c00; margin-top: 2px; }
+  .comparison-card { background: var(--card); border-radius: 10px; padding: 18px 22px;
+                     margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+                     border-top: 4px solid var(--brand2); }
+  .comparison-head { display: flex; justify-content: space-between; align-items: center;
+                     flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .comparison-head h3 { margin: 0; font-size: 14px; text-transform: uppercase;
+                        letter-spacing: .5px; color: var(--muted); }
+  .comparison-periods { display: flex; gap: 10px; flex-wrap: wrap; }
+  .period-chip { font-size: 12px; padding: 4px 10px; border-radius: 12px;
+                  background: #ecf0f1; color: var(--text); display: inline-flex;
+                  align-items: center; gap: 6px; }
+  .period-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .period-chip.current .dot { background: var(--brand); }
+  .period-chip.prev .dot { background: var(--muted); }
+  .comparison-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                     gap: 14px; }
+  .cmp-stat { padding: 12px 14px; border-radius: 8px; background: #f9fbfc;
+              border-left: 3px solid var(--border); }
+  .cmp-stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+                     color: var(--muted); margin-bottom: 6px; }
+  .cmp-stat .values { display: flex; align-items: baseline; gap: 10px;
+                      font-variant-numeric: tabular-nums; }
+  .cmp-stat .cur { font-size: 18px; font-weight: 600; color: var(--text); }
+  .cmp-stat .pre { font-size: 12px; color: var(--muted); }
+  .cmp-stat .delta { margin-top: 4px; font-size: 12px; font-weight: 600; }
+  .cmp-stat .delta.up { color: #27ae60; }
+  .cmp-stat .delta.down { color: var(--danger); }
+  .cmp-stat .delta.flat { color: var(--muted); }
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; }
+    main { padding: 16px; }
+    header { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Reporte de ventas - Todos los meses disponibles</h1>
+  <p>PANAMA BEC &middot; __RANGO__ &middot; __MESES__ mes(es) cubierto(s), __LINEAS__ lineas &middot; <a href="/tickets" style="color:inherit">Ver tickets</a> &middot; <a href="/salir" style="color:inherit">Salir</a></p>
+</header>
+<main>
+
+
+  <section class="filters">
+    <div class="field">
+      <label>Mes (atajo)</label>
+      <select id="filterMonth"><option value="">Todos los meses</option></select>
+    </div>
+    <div class="field">
+      <label>Desde</label>
+      <input type="date" id="filterFrom">
+    </div>
+    <div class="field">
+      <label>Hasta</label>
+      <input type="date" id="filterTo">
+    </div>
+    <div class="field">
+      <label>Categoria (nivel 1)</label>
+      <select id="filterL1"><option value="">Todas las categorias</option></select>
+    </div>
+    <div class="field">
+      <label>Sub-categoria (nivel 2)</label>
+      <select id="filterL2"><option value="">Todas las sub-categorias</option></select>
+    </div>
+    <button id="btnClear" title="Limpiar todos los filtros">Limpiar filtros</button>
+    <span id="filterStatus" class="active-chip" style="display:none"></span>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section id="comparisonSection" class="comparison-card" style="display:none">
+    <div class="comparison-head">
+      <h3>Comparativo vs periodo anterior</h3>
+      <div class="comparison-periods">
+        <span class="period-chip current"><span class="dot"></span><strong>Actual:</strong> <span id="cmpCurrentLabel"></span></span>
+        <span class="period-chip prev"><span class="dot"></span><strong>Anterior:</strong> <span id="cmpPrevLabel"></span></span>
+      </div>
+    </div>
+    <div class="comparison-grid" id="comparisonGrid"></div>
+  </section>
+
+  <section id="subtotalSection" class="subtotal-card" style="display:none">
+    <h3 id="subtotalTitle">Subtotal por categoria</h3>
+    <div class="row" id="subtotalGrid"></div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Top 15 productos por venta neta</h2>
+      <canvas id="chartTopProd"></canvas>
+    </div>
+    <div class="card">
+      <h2>Ventas por categoria (nivel 1)</h2>
+      <canvas id="chartCatL1"></canvas>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2 id="trendTitle">Tendencia mensual</h2>
+      <canvas id="chartTrend"></canvas>
+    </div>
+    <div class="card">
+      <h2>Top 15 sub-categorias (nivel 2)</h2>
+      <canvas id="chartCatL2"></canvas>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Detalle por producto (respeta filtros)</h2>
+    <div class="toolbar">
+      <input id="search" placeholder="Buscar producto, codigo, marca, categoria...">
+      <span id="rowCount" class="pill"></span>
+    </div>
+    <div style="overflow-x:auto; max-height: 600px;">
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th data-key="codigo">Codigo</th>
+            <th data-key="nombre">Producto</th>
+            <th data-key="marca">Marca</th>
+            <th data-key="category_l1">Categoria</th>
+            <th data-key="category_l2">Sub-categoria</th>
+            <th data-key="unidades" class="num">Unidades</th>
+            <th data-key="bruto" class="num">Bruto</th>
+            <th data-key="notas_credito" class="num">N/C</th>
+            <th data-key="neto" class="num">Neto</th>
+            <th data-key="pct" class="num">% del total</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot id="tblFoot"></tfoot>
+      </table>
+    </div>
+  </section>
+
+  <p class="footer">Actualizado el __GENERADO__ &middot; Datos via InterFuerza API v4.
+     Moneda: USD &middot; Los montos NO incluyen ITBMS (calculado a nivel de linea).</p>
+</main>
+<script>

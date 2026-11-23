@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tickets BEC</title>
+<script src="/static/chart.umd.js"></script>
+<style>
+:root{--orange:#FF5100;--yellow:#FFCD00;--blue:#345D9D;--green:#00B451;--ink:#222;--bg:#FAFAF8;--gray:#5A5650;--line:#E4E0D8;--red:#C8321E}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"AcidGrotesk",Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45}
+header{background:var(--ink);color:var(--bg);padding:26px 24px}
+header .in,main{max-width:1180px;margin:0 auto}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--orange);font-weight:bold}
+h1{font-size:clamp(24px,4vw,34px);margin:6px 0 6px;font-weight:500}
+header p{margin:0;color:#cfcbc3;font-size:13px}
+header a{color:var(--yellow)}
+main{padding:24px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--orange);border-radius:8px;padding:14px 16px}
+.kpi .l{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--gray)}
+.kpi .v{font-size:28px;font-weight:500;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+.kpi .n{font-size:12px;color:var(--gray)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px}
+.card h2{font-size:15px;margin:0 0 2px;font-weight:500}
+.card .sub{font-size:12px;color:var(--gray);margin-bottom:10px}
+.ch{position:relative;height:260px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--gray);border-bottom:2px solid var(--ink)}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:#fff}
+.down{color:var(--red)}.up{color:var(--green)}
+.note{font-size:12px;color:var(--gray);margin-top:14px}
+@media(max-width:860px){.kpis{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}}
+</style></head><body>
+<header><div class="in">
+  <div class="eyebrow">BEC Experience Center</div>
+  <h1>Tickets</h1>
+  <p>Datos hasta el <span id="hasta"></span> &middot; actualizado el __GENERADO__ &middot; <a href="/">Reporte de ventas</a> &middot; <a href="/estado">Estado</a> &middot; <a href="/salir">Salir</a></p>
+</div></header>
+<main>
+  <section class="kpis" id="kpis"></section>
+  <section class="grid">
+    <div class="card"><h2>Entradas por mes</h2><div class="sub">Venta individual en caja y facturado (grupos, tour operadoras, corporativos)</div><div class="ch"><canvas id="cA"></canvas></div></div>
+    <div class="card"><h2>Entradas por dia en caja</h2><div class="sub">Promedio por dia: sabado y domingo frente a lunes a viernes</div><div class="ch"><canvas id="cB"></canvas></div></div>
+    <div class="card"><h2>Neto de tickets</h2><div class="sub">Entradas y adicionales (degustaciones), USD sin ITBMS</div><div class="ch"><canvas id="cC"></canvas></div></div>
+    <div class="card"><h2>Mezcla de publico</h2><div class="sub">Residentes 13+, extranjeros y ninos por mes</div><div class="ch"><canvas id="cD"></canvas></div></div>
+  </section>
+  <div class="card"><h2>Detalle mensual</h2><div class="sub">El ultimo mes aparece con * cuando esta incompleto</div>
+    <div class="scroll"><table id="tbl"></table></div>
+    <p class="note">Entradas = admisiones (residentes, extranjeros, jubilados, ninos y grupos); no incluye degustaciones ni Bus Rojo. Facturado = documentos con numeracion INV, contados en la fecha de la factura. Ingreso por entrada = neto total de tickets, con adicionales, dividido entre entradas.</p>
+  </div>
+</main>
+<script>
+const T = __TICKETS__;
+const n = T.m.length, last = n - 1;
+const es = (v, o) => Number(v).toLocaleString('es-PA', o);
+const usd = v => '$' + es(Math.round(v));
+const one = v => es(v, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+const lbl = T.lbl.map((l, i) => l + (i === last && T.parcial ? '*' : ''));
+document.getElementById('hasta').textContent = T.hasta || '';
+if (n) {
+  const perDay = i => T.dias[i] ? T.caja[i] / T.dias[i] : 0;
+  const prev = last > 0 ? last - 1 : 0;
+  const dayRate = i => T.dias[i] ? T.neto[i] / T.dias[i] : 0;
+  const d = (a, b) => b ? (a - b) / b * 100 : null;
+  const tag = p => p === null ? '' : `<span class="${p < 0 ? 'down' : 'up'}">${p >= 0 ? '+' : ''}${es(p, {maximumFractionDigits: 0})}%</span>`;
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi"><div class="l">Neto tickets ${lbl[last]}</div><div class="v">${usd(T.neto[last])}</div><div class="n">${usd(dayRate(last))} por dia &middot; ${tag(d(dayRate(last), dayRate(prev)))} vs ${lbl[prev]}</div></div>
+    <div class="kpi"><div class="l">Entradas ${lbl[last]}</div><div class="v">${es(T.caja[last] + T.fact[last])}</div><div class="n">${es(T.caja[last])} en caja &middot; ${es(T.fact[last])} facturadas</div></div>
+    <div class="kpi"><div class="l">Entradas por dia en caja</div><div class="v">${one(perDay(last))}</div><div class="n">${one(perDay(prev))} en ${lbl[prev]} &middot; ${tag(d(perDay(last), perDay(prev)))}</div></div>
+    <div class="kpi"><div class="l">Ingreso por entrada</div><div class="v">$${es(T.ipv[last], {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div><div class="n">${one(T.deg[last])} degustaciones por 100 entradas</div></div>`;
+  const C = {orange: '#FF5100', yellow: '#FFCD00', blue: '#345D9D', green: '#00B451'};
+  const base = (stacked, money) => ({responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+    plugins: {legend: {position: 'bottom', labels: {boxWidth: 12, font: {size: 11}}},
+      tooltip: {callbacks: {label: c => c.dataset.label + ': ' + (money ? usd(c.parsed.y) : es(c.parsed.y))}}},
+    scales: {x: {stacked, grid: {display: false}, ticks: {font: {size: 10}}},
+      y: {stacked, beginAtZero: true, ticks: {font: {size: 10}, callback: v => money ? usd(v) : es(v)}}}});
+  const bar = (label, data, color) => ({label, data, backgroundColor: color, borderRadius: 2});
+  new Chart(document.getElementById('cA'), {type: 'bar', data: {labels: lbl, datasets: [bar('Caja', T.caja, C.blue), bar('Facturado', T.fact, C.orange)]}, options: base(true)});
+  new Chart(document.getElementById('cB'), {type: 'bar', data: {labels: lbl, datasets: [bar('Sabado y domingo', T.we, C.blue), bar('Lunes a viernes', T.wd, C.orange)]}, options: base(false)});
+  new Chart(document.getElementById('cC'), {type: 'bar', data: {labels: lbl, datasets: [bar('Entradas y otros', T.neto.map((v, i) => v - T.adic[i]), C.blue), bar('Adicionales', T.adic, C.orange)]}, options: base(true, true)});
+  new Chart(document.getElementById('cD'), {type: 'bar', data: {labels: lbl, datasets: [bar('Residentes 13+', T.res, C.blue), bar('Extranjeros', T.extr, C.orange), bar('Ninos', T.nin, C.green)]}, options: base(true)});
+  document.getElementById('tbl').innerHTML = `<thead><tr><th>Mes</th><th>Neto tickets</th><th>Adicionales</th><th>Entradas</th><th>En caja</th><th>Facturado</th><th>Caja / dia</th><th>Sab-dom / dia</th><th>Lun-vie / dia</th><th>% extranjeros</th><th>% ninos</th><th>Ingreso / entrada</th><th>Degust. / 100</th></tr></thead><tbody>` +
+    T.m.map((m, i) => `<tr><td>${lbl[i]}</td><td>${usd(T.neto[i])}</td><td>${usd(T.adic[i])}</td><td>${es(T.caja[i] + T.fact[i])}</td><td>${es(T.caja[i])}</td><td>${es(T.fact[i])}</td><td>${one(perDay(i))}</td><td>${one(T.we[i])}</td><td>${one(T.wd[i])}</td><td>${one(T.ext[i])}%</td><td>${one(T.nin_pct[i])}%</td><td>$${es(T.ipv[i], {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td><td>${one(T.deg[i])}</td></tr>`).reverse().join('') + '</tbody>';
+}
+</script>
+</body></html>
