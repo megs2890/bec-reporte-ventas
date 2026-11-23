@@ -178,3 +178,10 @@ def test_resumen_requiere_enlace_privado(tmp_path, monkeypatch):
         assert c.get("/resumen/malo").status_code == 404
         r = c.get(f"/resumen/{main._resumen_token()}?dia=2026-11-17")
         assert r.status_code == 200 and r.json()["venta_neta"] == 627.75 and r.json()["al_dia"] is False
+        e = r.json()
+        c = e["campos"]
+        assert e["control"] == 17 + 10 + 507 + 296 + 761 + 184 + 4767 + 0 + 62775
+        assert c["dif_tk_ant"] == "[-] -254 (-33.4%)" and c["venta_neta_fmt"] == "$627.75"
+        with TestClient(main.app) as c2:
+            page = c2.get(f"/resumen/{main._resumen_token()}?dia=2026-11-17&formato=lista").text
+        assert "<li>tk_mes: 507</li>" in page and "<li>dif_ad_anio: [+] +296 (sin base)</li>" in page

@@ -255,5 +255,17 @@ Filtro adicionales: TICKETS / ADICIONALES
 
 {link}
 Este correo fue generado automaticamente."""
+    # Campos cortos, ya con formato, para armar el correo sin copiar el texto largo.
+    # "control" es la suma de las cantidades mas la venta neta en centavos: sirve para
+    # comprobar que los valores se leyeron bien.
+    campos = {
+        "fecha_larga": fecha_larga(day), "venta_neta_fmt": f"${neta:,.2f}",
+        "tk_dia": tk_d, "ad_dia": ad_d, "mes_desde": m0, "mes_hasta": day, "tk_mes": tk_m, "ad_mes": ad_m,
+        "mes_nombre": mes, "ant_nombre": mes_p, "ant_desde": p0, "ant_hasta": p1, "tk_ant": tk_p, "ad_ant": ad_p,
+        "dif_tk_ant": _dif(tk_m, tk_p), "dif_ad_ant": _dif(ad_m, ad_p),
+        "anio_nombre": mes_y, "anio_desde": y0, "anio_hasta": y1, "tk_anio": tk_y, "ad_anio": ad_y,
+        "dif_tk_anio": _dif(tk_m, tk_y), "dif_ad_anio": _dif(ad_m, ad_y),
+    }
+    control = tk_d + ad_d + tk_m + ad_m + tk_p + ad_p + tk_y + ad_y + round(neta * 100)
     return {"dia": day, "asunto": f"Reporte ventas - {fecha_larga(day)}", "texto": text,
-            "actualizado": actualizado, "venta_neta": round(neta, 2)}
+            "actualizado": actualizado, "venta_neta": round(neta, 2), "campos": campos, "control": control}

@@ -199,7 +199,7 @@ def _resumen_token() -> str:
 
 
 @app.get("/resumen/{token}")
-def resumen(token: str, dia: str = ""):
+def resumen(token: str, dia: str = "", formato: str = ""):
     """Resumen del dia anterior para la tarea que envia el correo. Solo responde con el enlace privado."""
     good = _resumen_token()
     if not good or not hmac.compare_digest(token.encode(), good.encode()):
@@ -214,6 +214,14 @@ def resumen(token: str, dia: str = ""):
     # "al_dia" indica si la base ya se actualizo hoy; si no, no conviene enviar el correo
     out["al_dia"] = actualizado[:10] == today.isoformat() and datos_hasta >= day
     out["datos_hasta"] = datos_hasta
+    if formato == "lista":
+        # version en lineas "clave: valor", facil de leer para herramientas que no devuelven JSON literal
+        rows = [("asunto", out["asunto"]), ("al_dia", "si" if out["al_dia"] else "no"),
+                ("datos_hasta", datos_hasta), ("actualizado", actualizado), ("control", out["control"])]
+        rows += list(out["campos"].items())
+        body = "<!DOCTYPE html><html lang=\"es\"><head><meta charset=\"UTF-8\"><title>Resumen</title></head><body><ul>" + \
+               "".join(f"<li>{k}: {v}</li>" for k, v in rows) + "</ul></body></html>"
+        return HTMLResponse(body, headers={"Cache-Control": "no-store"})
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
 
